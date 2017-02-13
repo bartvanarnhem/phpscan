@@ -5,6 +5,7 @@ import subprocess
 import json
 import re
 from opcode import Operand
+from timeit import default_timer as timer
 
 
 def verify_dependencies():
@@ -128,6 +129,8 @@ class Scan:
         self._seen = set()
         self._queue = collections.deque()
         self._reached_cases = []
+        self._duration = -1
+        self._num_runs = -1
 
     @property
     def php_file(self):
@@ -160,6 +163,9 @@ class Scan:
     def start(self):
         self._queue.append(State(self.initial_state))
 
+        start = timer()
+        self._num_runs = 0
+
         while len(self._queue) > 0:
             state = self._queue.popleft()
 
@@ -175,6 +181,10 @@ class Scan:
                 for new_state in self.satisfier.process(sanitized_ops):
                     self._queue.append(new_state)
 
+            self._num_runs += 1
+
+        end = timer()
+        self._duration = end - start
         self.done()
 
     def done(self):
@@ -224,13 +234,10 @@ class Scan:
 
     def filter_php_response(self, category, output):
         result = None
-        matches = re.search(
-            r'__PHPSCAN_%s__(.*)__/PHPSCAN_%s__' % (category, category), output)
+        matches = re.findall(
+            r'__PHPSCAN_%s__(.*?)__/PHPSCAN_%s__' % (category, category), output)
 
-        if matches:
-            result = matches.groups()[0]
-
-        return result
+        return matches
 
     def invoke_php(self, state, php_file):
         state_json = json.dumps(state.state_annotated)
@@ -256,21 +263,26 @@ class Scan:
     def check_reached_cases(self, output, state):
         reached_cases = self.filter_php_response('FLAG', output)
 
-        if reached_cases:
+        for case in reached_cases:
             self._reached_cases.append({
-                'case': reached_cases,
+                'case': case,
                 'state': state
             })
 
     def filter_hit_ops(self, output):
         opcodes = []
         opcode_json = self.filter_php_response('OPS', output)
-        if opcode_json:
-            opcodes = json.loads(opcode_json)
+        if len(opcode_json) > 0:
+            opcodes = json.loads(opcode_json[0])
 
         return opcodes
 
     def print_results(self):
+        print 'Scanning of %s finished...' % self._php_file
+        print ' - Needed %d runs' % self._num_runs
+        print ' - Took %f seconds' % self._duration
+        print ''
+
         for reached_case in self._reached_cases:
             print 'Successfully reached "%s" using input:' % reached_case['case']
             print reached_case['state'].pretty_print()
