@@ -57,6 +57,7 @@ class IsSmallerHandler(OpcodeHandler):
         var = self.satisfier.start_state.get_var_ref(compare_op.id)
         value = value_op.value
 
+        var['type'] = value_op.data_type
         var['value'] = value - 1 * sign
 
 
