@@ -4,8 +4,27 @@ import collections
 import subprocess
 import json
 import re
+import os
 from opcode import Operand
 from timeit import default_timer as timer
+
+INITIAL_STATE = {
+    '_POST': {
+        'type': 'array'
+    },
+    '_REQUEST': {
+        'type': 'array'
+    },
+    '_GET': {
+        'type': 'array'
+    },
+    '_COOKIE': {
+        'type': 'array'
+    }
+}
+
+PHP_LOADER = '%s/../php_loader/phpscan.php' % os.path.dirname(__file__)
+TMP_PHPSCRIPT_PATH = '/tmp/phpscan_%s.py'
 
 
 def verify_dependencies():
@@ -121,20 +140,35 @@ class State:
 
         return output
 
-
 class Scan:
+    INPUT_MODE_FILE = 1 << 0
+    INPUT_MODE_SCRIPT = 1 << 1
 
-    def __init__(self, php_file):
-        self._php_file = php_file
+    def __init__(self, php_file_or_script, input_mode = INPUT_MODE_FILE):
+        self._php_file_or_script = php_file_or_script
+        self._input_mode = input_mode
         self._seen = set()
         self._queue = collections.deque()
         self._reached_cases = []
         self._duration = -1
         self._num_runs = -1
 
+
+        self._initial_state = INITIAL_STATE
+        self._php_loader_location = PHP_LOADER
+
+        # Looks like Zend's opcode handlers are not triggered for PHP code we directly execute using -r from the CLI.
+        # Therefore, if in INPUT_MODE_SCRIPT, wrap the passed PHP code in a temporary file and include this instead.
+        # TODO: find out if we can remove this step
+        self.init_tmp_script()
+    
+    def __del__(self):
+        self.cleanup_tmp_script()
+
+
     @property
     def php_file(self):
-        return self._php_file
+        return self._php_file_or_script
 
     @property
     def initial_state(self):
@@ -143,6 +177,10 @@ class Scan:
     @initial_state.setter
     def initial_state(self, value):
         self._initial_state = value
+
+    @property
+    def num_runs(self):
+        return self._num_runs
 
     @property
     def satisfier(self):
@@ -190,6 +228,17 @@ class Scan:
     def done(self):
         pass
 
+    def init_tmp_script(self):
+        if self._input_mode == Scan.INPUT_MODE_SCRIPT:
+            self._tmp_php_script = TMP_PHPSCRIPT_PATH % uuid.uuid4()
+
+            with open(self._tmp_php_script, 'w') as tmp_handle:
+                tmp_handle.write('<?php %s ?>' % self._php_file_or_script)
+
+    def cleanup_tmp_script(self):
+        if self._input_mode == Scan.INPUT_MODE_SCRIPT and os.path.exists(self._tmp_php_script):
+            os.remove(self._tmp_php_script)
+
     def is_state_seen(self, state):
         return state.hash in self._seen
 
@@ -200,7 +249,7 @@ class Scan:
         logger.log(
             'Running with new input', state.pretty_print(), Logger.PROGRESS)
 
-        ops = self.invoke_php(state, self._php_file)
+        ops = self.invoke_php(state, self._php_file_or_script)
 
         logger.log('PHP OPs', json.dumps(ops, indent=4), Logger.PROGRESS)
 
@@ -223,12 +272,18 @@ class Scan:
 
         return sanitized_ops
 
-    def generate_php_initializer_code(self, state_json, php_file):
+    def generate_php_initializer_code(self, state_json, php_file_or_script):
 
         state_json = state_json.replace('"', '\\"')
 
+        php_file = php_file_or_script
+        if self._input_mode == Scan.INPUT_MODE_SCRIPT:
+            php_file = self._tmp_php_script
+
         code = '"include \\"%s\\"; phpscan_initialize(\'%s\'); include \\"%s\\";"' % (
             self.php_loader_location, state_json, php_file)
+
+        print code
 
         return code
 
@@ -239,10 +294,10 @@ class Scan:
 
         return matches
 
-    def invoke_php(self, state, php_file):
+    def invoke_php(self, state, php_file_or_script):
         state_json = json.dumps(state.state_annotated)
 
-        code = self.generate_php_initializer_code(state_json, php_file)
+        code = self.generate_php_initializer_code(state_json, php_file_or_script)
 
         logger.log('Invoking PHP with', code, Logger.DEBUG)
 
@@ -269,6 +324,14 @@ class Scan:
                 'state': state
             })
 
+    def has_reached_case(self, flag):
+        r = False
+        for case in self._reached_cases:
+            if case['case'] == flag:
+                r = True
+
+        return r
+
     def filter_hit_ops(self, output):
         opcodes = []
         opcode_json = self.filter_php_response('OPS', output)
@@ -278,7 +341,7 @@ class Scan:
         return opcodes
 
     def print_results(self):
-        print 'Scanning of %s finished...' % self._php_file
+        print 'Scanning of %s finished...' % self._php_file_or_script
         print ' - Needed %d runs' % self._num_runs
         print ' - Took %f seconds' % self._duration
         print ''
