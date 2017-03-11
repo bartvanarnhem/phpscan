@@ -12,44 +12,66 @@ long zval_to_id(zval* val)
   return id;
 }
 
-static void trigger_op_php_callback(zend_uchar opcode, zval* op1, zend_uchar op1type, zval* op2, zend_uchar op2type)
+int in_callback = 0;
+static void trigger_op_php_callback(zend_uchar opcode, 
+                                    zval* op1, zend_uchar op1type, 
+                                    zval* op2, zend_uchar op2type,
+                                    zval* result, zend_uchar resulttype)
 {
-    zval* params = NULL;
-    uint param_count = 5;
-
-    params = safe_emalloc(sizeof(zval), param_count, 0);
-
-    zval function_name;
-    ZVAL_STRING(&function_name, OP_PHP_CALLBACK_FUNCTION);
-
-    zval opcode_zval;
-    ZVAL_LONG(&opcode_zval, opcode);
-
-    zval op1type_zval;
-    ZVAL_LONG(&op1type_zval, op1type);
-
-    zval op2type_zval;
-    ZVAL_LONG(&op2type_zval, op2type);
-
-    params[0] = opcode_zval;
-    params[1] = *op1;
-    params[2] = op1type_zval;
-    params[3] = *op2;
-    params[4] = op2type_zval;
-
-    zval return_value;
-
-    if (call_user_function(
-            EG(function_table), NULL /* no object */, &function_name,
-            &return_value, param_count,     params TSRMLS_CC
-        ) == SUCCESS
-    )
+    if (!in_callback)
     {
-        /* do something with retval_ptr here if you like */
-    }
+        zval* params = NULL;
+        uint param_count = 7;
 
-    efree(params);
-    zval_ptr_dtor(&return_value);
+        params = safe_emalloc(sizeof(zval), param_count, 0);
+
+        zval function_name;
+        ZVAL_STRING(&function_name, OP_PHP_CALLBACK_FUNCTION);
+
+        zval opcode_zval;
+        ZVAL_LONG(&opcode_zval, opcode);
+
+        zval op1type_zval;
+        ZVAL_LONG(&op1type_zval, op1type);
+
+        zval op2type_zval;
+        ZVAL_LONG(&op2type_zval, op2type);
+
+        zval resulttype_zval;
+        ZVAL_LONG(&resulttype_zval, resulttype);
+
+
+        params[0] = opcode_zval;
+        params[1] = *op1;
+        params[2] = op1type_zval;
+        params[3] = *op2;
+        params[4] = op2type_zval;
+        if (result)
+            params[5] = *result;
+        else
+            ZVAL_NULL(&params[5]);
+        params[6] = resulttype_zval;
+
+        zval return_value;
+
+        in_callback = 1;
+        if (call_user_function(
+                EG(function_table), NULL /* no object */, &function_name,
+                &return_value, param_count,     params TSRMLS_CC
+            ) == SUCCESS
+        )
+        {
+            /* do something with retval_ptr here if you like */
+        }
+        in_callback = 0;
+
+        efree(params);
+        zval_ptr_dtor(&return_value);
+    }
+    else
+    {
+        printf("Warning: ignoring opcode %d while already in callback to prevent infinite recursion.\n", opcode);
+    }
 }
 
 PHP_FUNCTION(phpscan_enabled)
@@ -83,10 +105,14 @@ static int common_override_handler(zend_execute_data *execute_data)
 
     int is_var;
     zval* op1 = get_zval(execute_data, opline->op1_type, &opline->op1, &is_var);
-
     zval* op2 = get_zval(execute_data, opline->op2_type, &opline->op2, &is_var);
+    zval* result = get_zval(execute_data, opline->result_type, &opline->result, &is_var);
 
-    trigger_op_php_callback(opline->opcode, op1, opline->op1_type, op2, opline->op2_type);
+    trigger_op_php_callback(opline->opcode,
+                            op1, opline->op1_type,
+                            op2, opline->op2_type,
+                            result, opline->result_type
+                            );
 
     return ZEND_USER_OPCODE_DISPATCH;
 }
@@ -106,6 +132,8 @@ PHP_MINIT_FUNCTION(phpscan)
 
     register_handler(ZEND_IS_SMALLER);
     register_handler(ZEND_IS_SMALLER_OR_EQUAL);
+
+    register_handler(ZEND_ASSIGN);
 
     return SUCCESS;
 }
