@@ -11,28 +11,35 @@ $__phpscan_op = array();
 
 function phpscan_ext_opcode_handler($opcode, 
                   $op1, $op1type,
-                  $op2, $op2type)
+                  $op2, $op2type,
+                  $result, $resulttype)
 {
   global $__phpscan_init_complete;
   global $__phpscan_op_ignore;
 
   if (!$__phpscan_op_ignore && $__phpscan_init_complete)
   {
-    $op = array(
-      'opcode' => $opcode,
+    if ($opcode === 38)
+    {
+      print 'GOT ASSIGN' . "\n";
+    }
+    else
+    {
+      $op = array(
+        'opcode' => $opcode,
 
-      'op1_value' => $op1,
-      'op1_id' => phpscan_lookup_zval($op1),
-      'op1_type' => $op1type,
-      'op1_data_type' => gettype($op1),
+        'op1_value' => $op1,
+        'op1_id' => phpscan_lookup_zval($op1),
+        'op1_type' => $op1type,
+        'op1_data_type' => gettype($op1),
 
-      'op2_value' => $op2,
-      'op2_id' => phpscan_lookup_zval($op2),
-      'op2_type' => $op2type,
-      'op2_data_type' => gettype($op2)
-    );
-
-    phpscan_log_op($op);
+        'op2_value' => $op2,
+        'op2_id' => phpscan_lookup_zval($op2),
+        'op2_type' => $op2type,
+        'op2_data_type' => gettype($op2)
+      );
+      phpscan_log_op($op);
+    }
   }
 }
 
@@ -51,7 +58,6 @@ function phpscan_initialize($state)
 function phpscan_initialize_environment($state)
 {
   global $__phpscan_init_complete;
-
 
   $state_decoded = json_decode($state);
 
