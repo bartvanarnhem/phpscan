@@ -46,8 +46,10 @@ static void trigger_op_php_callback(zend_uchar opcode,
         params[2] = op1type_zval;
         params[3] = *op2;
         params[4] = op2type_zval;
+        // TODO: looks like result can be unitialized even though type != IS_UNUSED... use NULL for now
         if (result)
-            params[5] = *result;
+            ZVAL_NULL(&params[5]);
+            // params[5] = *result;
         else
             ZVAL_NULL(&params[5]);
         params[6] = resulttype_zval;
