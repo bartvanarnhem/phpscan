@@ -18,10 +18,6 @@ class GreedySatisfier(Satisfier):
 
 
 class UninitializedPropertyAccessHandler(OpcodeHandler):
-
-    def __init__(self, opcode_name, satisfier):
-        OpcodeHandler.__init__(self, opcode_name, satisfier)
-
     def process_op(self, compare_op, value_op, sign=-1):
         state_var = self.satisfier.start_state.get_var_ref(compare_op.id)
         property_name = value_op.value
@@ -37,28 +33,22 @@ class UninitializedPropertyAccessHandler(OpcodeHandler):
 
 
 class IsEqualHandler(OpcodeHandler):
-
-    def __init__(self, operand_name, satisfier):
-        OpcodeHandler.__init__(self, operand_name, satisfier)
-
     def process_op(self, compare_op, value_op, sign=-1):
-        var = self.satisfier.start_state.get_var_ref(compare_op.id)
+        id = compare_op.id
+        data_type = value_op.data_type
+        value = value_op.value
 
-        var['type'] = value_op.data_type
-        var['value'] = value_op.value
+        self.establish_var_value(id, data_type, value)
 
 
 class IsSmallerHandler(OpcodeHandler):
-
-    def __init__(self, opcode_name, satisfier):
-        OpcodeHandler.__init__(self, opcode_name, satisfier)
-
     def process_op(self, compare_op, value_op, sign=1):
-        var = self.satisfier.start_state.get_var_ref(compare_op.id)
-        value = value_op.value
+        id = compare_op.id
+        data_type = value_op.data_type
+        value = value_op.value - 1 * sign
 
-        var['type'] = value_op.data_type
-        var['value'] = value - 1 * sign
+        self.establish_var_value(id, data_type, value)
+
 
 
 satisfier_handlers = [

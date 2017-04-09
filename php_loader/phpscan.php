@@ -3,6 +3,7 @@
 register_shutdown_function('phpscan_handle_shutdown');
 
 $__phpscan_variable_map = array();
+$__phpscan_transform = array();
 $__phpscan_init_complete = false;
 $__phpscan_op_ignore = false;
 $__phpscan_op = array();
@@ -21,7 +22,19 @@ function phpscan_ext_opcode_handler($opcode,
   {
     if ($opcode === 38)
     {
-      print 'GOT ASSIGN' . "\n";
+      $op = array(
+        'opcode' => $opcode,
+
+        'op1_value' => $op1,
+        'op1_id' => phpscan_lookup_zval($op1),
+        'op1_type' => $op1type,
+        'op1_data_type' => __phpscan_replace_gettype($op1),
+
+        'op2_value' => $op2,
+        'op2_id' => phpscan_lookup_zval($op2),
+        'op2_type' => $op2type,
+        'op2_data_type' => __phpscan_replace_gettype($op2)
+      );
     }
     else
     {
@@ -31,12 +44,12 @@ function phpscan_ext_opcode_handler($opcode,
         'op1_value' => $op1,
         'op1_id' => phpscan_lookup_zval($op1),
         'op1_type' => $op1type,
-        'op1_data_type' => gettype($op1),
+        'op1_data_type' => __phpscan_replace_gettype($op1),
 
         'op2_value' => $op2,
         'op2_id' => phpscan_lookup_zval($op2),
         'op2_type' => $op2type,
-        'op2_data_type' => gettype($op2)
+        'op2_data_type' => __phpscan_replace_gettype($op2)
       );
       phpscan_log_op($op);
     }
@@ -157,6 +170,7 @@ function phpscan_separate_zval($var)
 function phpscan_handle_shutdown()
 {
   phpscan_report_opcodes();
+  phpscan_report_transform();
 }
 
 function phpscan_flag($flag)
@@ -167,7 +181,7 @@ function phpscan_flag($flag)
 function phpscan_report_opcodes()
 {
   global $__phpscan_op;
-  $json = json_encode($__phpscan_op);
+  $json = __phpscan_replace_json_encode($__phpscan_op);
   
   print '__PHPSCAN_OPS__' . $json . '__/PHPSCAN_OPS__';
 
@@ -175,7 +189,12 @@ function phpscan_report_opcodes()
   var_dump('MAP', $__phpscan_variable_map);
 }
 
-
+function phpscan_report_transform()
+{
+  global $__phpscan_transform;
+  $json = __phpscan_replace_json_encode($__phpscan_transform);
+  print '__PHPSCAN_TRANSFORMS__' . $json . '__/PHPSCAN_TRANSFORMS__';
+}
 
 
 
@@ -189,19 +208,32 @@ function __phpscan_taint_hook($func, $args)
 {
   global $__phpscan_variable_map;
   global $__phpscan_op_ignore;
+  global $__phpscan_transform;
 
   $__phpscan_op_ignore = true;
 
   $var_zval_id = null;
-  $taint = false;
+  $taint = array();
+  $args_symbolic = array();
   for ($i = 0; $i < __phpscan_replace_count($args); ++$i)
   {
     $var = $args[$i];
     $var_zval_id = phpscan_ext_get_zval_id($var);
     if (__phpscan_replace_array_key_exists($var_zval_id, $__phpscan_variable_map))
     {
-      $taint = true;
-      break;
+      $taint[] = $__phpscan_variable_map[$var_zval_id];
+      $args_symbolic[] = array(
+        'type' => 'symbolic',
+        'id' => $__phpscan_variable_map[$var_zval_id],
+        'value' => $var
+      );
+    }
+    else
+    {
+      $args_symbolic[] = array(
+        'type' => 'var',
+        'value' => $var
+      );
     }
   }
 
@@ -209,10 +241,15 @@ function __phpscan_taint_hook($func, $args)
 
   $res = __phpscan_replace_call_user_func_array($func, $args);
 
-  if ($taint)
+  if (__phpscan_replace_count($taint) > 0)
   {
     $res_zval_id = phpscan_ext_get_zval_id($res);
-    $__phpscan_variable_map[$res_zval_id] = $__phpscan_variable_map[$var_zval_id];
+    $__phpscan_variable_map[$res_zval_id] = 'transform(' . __phpscan_replace_implode(',', $taint) . ')';
+    $__phpscan_transform[$__phpscan_variable_map[$res_zval_id]] = array(
+      'function' => __phpscan_replace_str_replace('__phpscan_replace_', '', $func),
+      'ids' => $taint,
+      'args' => $args_symbolic
+    );
 
   }
 
@@ -234,7 +271,7 @@ function phpscan_replace_internals()
 
   foreach ($hook_functions as $f)
   {
-    printf("Replacing %s ...\n", $f);
+    // printf("Replacing %s ...\n", $f);
     runkit_function_rename($f, '__phpscan_replace_' . $f);
     runkit_function_add($f, '', 'return __phpscan_taint_hook("__phpscan_replace_' . $f . '", __phpscan_replace_func_get_args());');
   }

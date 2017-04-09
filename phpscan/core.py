@@ -100,8 +100,8 @@ class State:
         state_copy = copy.deepcopy(self.state)
         return State(state_copy)
 
-    def is_tracking(self, op):
-        return op.id in self._lookup_map
+    def is_tracking(self, id):
+        return id in self._lookup_map
 
     def get_var_ref(self, id):
         return self._lookup_map[id]
@@ -212,11 +212,11 @@ class Scan:
 
                 self.satisfier.start_state = state.fork()
 
-                php_recorded_ops = self.process_state(
+                php_recorded_ops, php_recorded_transforms  = self.process_state(
                     self.satisfier.start_state)
                 sanitized_ops = self.sanitize_ops(php_recorded_ops)
 
-                for new_state in self.satisfier.process(sanitized_ops):
+                for new_state in self.satisfier.process(sanitized_ops, php_recorded_transforms):
                     self._queue.append(new_state)
 
             self._num_runs += 1
@@ -249,11 +249,12 @@ class Scan:
         logger.log(
             'Running with new input', state.pretty_print(), Logger.PROGRESS)
 
-        ops = self.invoke_php(state, self._php_file_or_script)
+        ops, transforms = self.invoke_php(state, self._php_file_or_script)
 
         logger.log('PHP OPs', json.dumps(ops, indent=4), Logger.PROGRESS)
+        logger.log('PHP TRANSFORMs', json.dumps(transforms, indent=4), Logger.PROGRESS)
 
-        return ops
+        return (ops, transforms)
 
     def sanitize_ops(self, ops):
         sanitized_ops = []
@@ -313,7 +314,9 @@ class Scan:
         self.check_reached_cases(output_stdout, state)
 
         opcodes = self.filter_hit_ops(output_stdout)
-        return opcodes
+        transforms = self.filter_transforms(output_stdout)
+
+        return (opcodes, transforms)
 
     def check_reached_cases(self, output, state):
         reached_cases = self.filter_php_response('FLAG', output)
@@ -333,12 +336,18 @@ class Scan:
         return r
 
     def filter_hit_ops(self, output):
-        opcodes = []
-        opcode_json = self.filter_php_response('OPS', output)
-        if len(opcode_json) > 0:
-            opcodes = json.loads(opcode_json[0])
+        return self.fetch_json_from_output('OPS', output)
 
-        return opcodes
+    def filter_transforms(self, output):
+        return self.fetch_json_from_output('TRANSFORMS', output)
+
+    def fetch_json_from_output(self, key, output):
+        items = []
+        json_str = self.filter_php_response(key, output)
+        if len(json_str) > 0:
+            items = json.loads(json_str[0])
+
+        return items        
 
     def print_results(self):
         print 'Scanning of %s finished...' % self._php_file_or_script
