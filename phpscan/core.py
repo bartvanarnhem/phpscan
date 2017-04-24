@@ -28,36 +28,38 @@ TMP_PHPSCRIPT_PATH = '/tmp/phpscan_%s.py'
 
 
 def verify_dependencies():
-    ok = True
+    verify_ok = True
 
     if not verify_zend_extension_enabled():
         print 'FATAL: PHPSCan Zend module is not properly installed'
-        ok = False
+        verify_ok = False
 
-    return ok
+    return verify_ok
 
 def verify_zend_extension_enabled():
-    proc = subprocess.Popen(['php', '-r', 'print phpscan_enabled();'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(['php', '-r', 'print phpscan_enabled();'],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE)
 
     output_stdout = proc.stdout.read()
     output_stderr = proc.stderr.read()
 
     return not 'Call to undefined function phpscan_enabled' in output_stdout + output_stderr
 
-class Logger:
+class Logger(object):
     STANDARD = 0
     PROGRESS = 1
     DEBUG = 2
 
     def __init__(self, verbosity=STANDARD):
-        self.verbosity = verbosity
+        self._verbosity = verbosity
 
     @property
     def verbosity(self):
         return self._verbosity
 
     @verbosity.setter
-    def state(self, value):
+    def verbosity(self, value):
         self._verbosity = value
 
     def log(self, section, content, min_level=0):
@@ -71,12 +73,13 @@ class Logger:
 logger = Logger()
 
 
-class State:
+class State(object):
 
     def __init__(self, state):
-        self.state = state
+        self._state = state
         self._state_annotated = None
         self._lookup_map = None
+        self._conditions = []
 
         self.annotate()
 
@@ -93,37 +96,90 @@ class State:
         return self._state_annotated
 
     @property
+    def conditions(self):
+        return self._conditions
+
+    @conditions.setter
+    def conditions(self, value):
+        self._conditions = value
+
+
+    @property
     def hash(self):
-        return make_hash(self.state)
+
+        hash_state = copy.deepcopy(self.state)
+        hash_conditions = copy.deepcopy(self.conditions)
+
+        def clean_state(items):
+            for key in items.keys():
+                if 'value' in items[key]:
+                    del items[key]['value']
+                if 'properties' in items[key]:
+                    clean_state(items[key]['properties'])
+
+        clean_state(hash_state)
+
+        def clean_conditions(conditions):
+            for i, condition in enumerate(conditions):
+                if not '_cleaned' in condition:
+                    if condition['type'] == 'base_var':
+                        annotated_var = self.get_annotated_var_ref(condition['id'])
+                        condition['id'] = annotated_var['persistent_id']
+                    if 'args' in condition:
+                        clean_conditions(condition['args'])
+
+                    condition['_cleaned'] = True
+
+        clean_conditions(hash_conditions)
+
+        return make_hash({
+            'state': hash_state,
+            'conditions': hash_conditions
+        })
 
     def fork(self):
         state_copy = copy.deepcopy(self.state)
         return State(state_copy)
 
-    def is_tracking(self, id):
-        return id in self._lookup_map
+    def is_tracking(self, var_id):
+        return var_id in self._lookup_map
 
-    def get_var_ref(self, id):
-        return self._lookup_map[id]
+    def get_var_ref(self, var_id):
+        return self._lookup_map[var_id]
+
+    def get_annotated_var_ref(self, var_id):
+        return self._annotated_lookup_map[var_id]
+
 
     def annotate(self):
         self._lookup_map = dict()
+        self._annotated_lookup_map = dict()
+
         self._state_annotated = copy.deepcopy(self.state)
+        # self._state_annotated = self.state
 
         self.annotate_recurse(self._state_annotated, self.state)
 
-    def annotate_recurse(self, state_item_copy, state_item):
+    def annotate_recurse(self, state_item_copy, state_item, parent_hierarchy=[]):
         for key in state_item_copy.keys():
-            unique_id = str(uuid.uuid4())
-            state_item_copy[key]['id'] = unique_id
+
+            if 'id' in state_item_copy[key]:
+                unique_id = state_item_copy[key]['id']
+            else:
+                unique_id = str(uuid.uuid4())
+                state_item_copy[key]['id'] = unique_id
+                state_item_copy[key]['persistent_id'] = ':'.join(parent_hierarchy + [key])
+
             self._lookup_map[unique_id] = state_item[key]
+            self._annotated_lookup_map[unique_id] = state_item_copy[key]
 
             if 'properties' in state_item_copy[key]:
                 self.annotate_recurse(
-                    state_item_copy[key]['properties'], state_item[key]['properties'])
+                    state_item_copy[key]['properties'], state_item[key]['properties'],
+                    parent_hierarchy + [key])
 
     def pretty_print(self):
-        return self.pretty_print_recurse(self.state)
+        return self.pretty_print_recurse(self._state_annotated)
 
     def pretty_print_recurse(self, state_item, level=0):
         output = ''
@@ -135,16 +191,18 @@ class State:
                     var_info['properties'], level + 1)
             if 'value' in var_info:
                 indent = ' ' * 2 * (level + 1)
-                output += '%svalue: %s (%s)\n' % (indent,
-                                                  var_info['value'], var_info['type'])
+                output += '%svalue: %s (%s, %s)\n' % (indent,
+                                                      var_info['value'],
+                                                      var_info['type'],
+                                                      var_info['id'])
 
         return output
 
-class Scan:
+class Scan(object):
     INPUT_MODE_FILE = 1 << 0
     INPUT_MODE_SCRIPT = 1 << 1
 
-    def __init__(self, php_file_or_script, input_mode = INPUT_MODE_FILE):
+    def __init__(self, php_file_or_script, input_mode=INPUT_MODE_FILE):
         self._php_file_or_script = php_file_or_script
         self._input_mode = input_mode
         self._seen = set()
@@ -161,7 +219,7 @@ class Scan:
         # Therefore, if in INPUT_MODE_SCRIPT, wrap the passed PHP code in a temporary file and include this instead.
         # TODO: find out if we can remove this step
         self.init_tmp_script()
-    
+
     def __del__(self):
         self.cleanup_tmp_script()
 
@@ -212,7 +270,7 @@ class Scan:
 
                 self.satisfier.start_state = state.fork()
 
-                php_recorded_ops, php_recorded_transforms  = self.process_state(
+                php_recorded_ops, php_recorded_transforms = self.process_state(
                     self.satisfier.start_state)
                 sanitized_ops = self.sanitize_ops(php_recorded_ops)
 
@@ -259,14 +317,16 @@ class Scan:
     def sanitize_ops(self, ops):
         sanitized_ops = []
 
-        for op in ops:
+        for operator in ops:
             op1 = Operand(
-                op['op1_id'], op['op1_type'], op['op1_data_type'], op['op1_value'])
+                operator['op1_id'], operator['op1_type'], operator['op1_data_type'],
+                operator['op1_value'])
             op2 = Operand(
-                op['op2_id'], op['op2_type'], op['op2_data_type'], op['op2_value'])
+                operator['op2_id'], operator['op2_type'], operator['op2_data_type'],
+                operator['op2_value'])
 
             sanitized_ops.append({
-                'opcode': int(op['opcode']),
+                'opcode': int(operator['opcode']),
                 'op1': op1,
                 'op2': op2
             })
@@ -283,8 +343,6 @@ class Scan:
 
         code = '"include \\"%s\\"; phpscan_initialize(\'%s\'); include \\"%s\\";"' % (
             self.php_loader_location, state_json, php_file)
-
-        print code
 
         return code
 
@@ -328,12 +386,12 @@ class Scan:
             })
 
     def has_reached_case(self, flag):
-        r = False
+        ret = False
         for case in self._reached_cases:
             if case['case'] == flag:
-                r = True
+                ret = True
 
-        return r
+        return ret
 
     def filter_hit_ops(self, output):
         return self.fetch_json_from_output('OPS', output)
@@ -347,7 +405,7 @@ class Scan:
         if len(json_str) > 0:
             items = json.loads(json_str[0])
 
-        return items        
+        return items
 
     def print_results(self):
         print 'Scanning of %s finished...' % self._php_file_or_script
@@ -361,23 +419,23 @@ class Scan:
 
 
 # http://stackoverflow.com/questions/5884066/hashing-a-python-dictionary
-def make_hash(o):
+def make_hash(obj):
     """
     Makes a hash from a dictionary, list, tuple or set to any level, that contains
     only other hashable types (including any lists, tuples, sets, and
     dictionaries).
     """
 
-    if isinstance(o, (set, tuple, list)):
+    if isinstance(obj, (set, tuple, list)):
 
-        return tuple([make_hash(e) for e in o])
+        return tuple([make_hash(e) for e in obj])
 
-    elif not isinstance(o, dict):
+    elif not isinstance(obj, dict):
 
-        return hash(o)
+        return hash(obj)
 
-    new_o = copy.deepcopy(o)
-    for k, v in new_o.items():
-        new_o[k] = make_hash(v)
+    new_o = copy.deepcopy(obj)
+    for k, val in new_o.items():
+        new_o[k] = make_hash(val)
 
     return hash(tuple(frozenset(sorted(new_o.items()))))

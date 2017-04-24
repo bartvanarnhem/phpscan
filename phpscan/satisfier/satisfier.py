@@ -1,12 +1,13 @@
-from ..opcode import zend_opcode_list, zend_opcode_lookup
+from ..opcode import ZEND_OPCODE_LIST, ZEND_OPCODE_LOOKUP
 from ..core import Logger, logger
 from ..resolver import Resolver
+from ..solver import Solver
 
 class Satisfier:
 
     def __init__(self, handlers):
         self._handlers = dict()
-        self.start_state = None
+        self._start_state = None
 
     @property
     def start_state(self):
@@ -24,21 +25,25 @@ class Satisfier:
     def resolver(self, value):
         self._resolver = value
 
-    def is_tracking(self, op):
-        return self.start_state.is_tracking(op.id) or self.resolver.is_tracking(op.id)
+    def is_tracking(self, operator):
+        return self.start_state.is_tracking(operator.id) or self.resolver.is_tracking(operator.id)
 
     def process(self, ops, transforms):
         state = self.start_state
+        state.conditions = []
         self.resolver = Resolver(transforms, self.start_state)
 
-        for op in ops:
-            op1 = op['op1']
-            op2 = op['op2']
+        for operator in ops:
+            op1 = operator['op1']
+            op2 = operator['op2']
             if self.is_tracking(op1) or self.is_tracking(op2):
-                self.process_op(op['opcode'], op1, op2)
+                self.process_op(operator['opcode'], op1, op2)
             else:
                 logger.log(
-                    'Ignoring op on untracked operands', op, Logger.DEBUG)
+                    'Ignoring op on untracked operands', operator, Logger.DEBUG)
+
+        solver = Solver()
+        solver.solve(state, state.conditions)
 
         logger.log(
             'Resulted in new state', state.pretty_print(), Logger.PROGRESS)
@@ -50,7 +55,7 @@ class Satisfier:
             self._handlers[opcode].process(op1, op2)
         else:
             logger.log('Not processing %s (no handler)' %
-                       zend_opcode_list[opcode], '', Logger.DEBUG)
+                       ZEND_OPCODE_LIST[opcode], '', Logger.DEBUG)
 
     def register_handler(self, handler):
         self._handlers[handler.opcode] = handler
@@ -60,7 +65,7 @@ class OpcodeHandler:
 
     def __init__(self, opcode_name, satisfier):
         self.opcode_name = opcode_name
-        self.opcode = zend_opcode_lookup[opcode_name]
+        self.opcode = ZEND_OPCODE_LOOKUP[opcode_name]
         self.satisfier = satisfier
 
     def process(self, op1, op2):
@@ -76,8 +81,33 @@ class OpcodeHandler:
     def process_op(self, compare_op, value_op, sign=-1):
         raise Exception('process_op should be implemented in child class')
 
-    def establish_var_value(self, id, data_type, value):
-        self.satisfier.resolver.resolve(id, data_type, value)
+    def establish_var_value(self, var_id, data_type, value, operator):
+        r = {
+            'type': operator,
+            'args': [
+                self.satisfier.resolver.resolve(var_id, data_type),
+                {
+                    'type': 'raw_value',
+                    'value': value
+                }
+            ]
+        }
+
+        self.satisfier.start_state.conditions.append(r)
+
+    def update_guessed_type_from_value(self, var_id, value):
+        if self.satisfier.start_state.is_tracking(var_id):
+            var = self.satisfier.start_state.get_var_ref(var_id)
+
+            if isinstance(value, int) and var['type'] != 'integer':
+                var['type'] = 'integer'
+                try:
+                    var['value'] = int(var['value'])
+                except ValueError:
+                    logger.log('Got op type hint for integer but could not cast %s to int.' %
+                            var['value'], '', Logger.DEBUG)
+
+                    var['value'] = 0
 
     @property
     def opcode(self):

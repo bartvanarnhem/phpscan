@@ -7,6 +7,7 @@ $__phpscan_transform = array();
 $__phpscan_init_complete = false;
 $__phpscan_op_ignore = false;
 $__phpscan_op = array();
+$__phpscan_taint_hook = array();
 
 
 
@@ -52,6 +53,34 @@ function phpscan_ext_opcode_handler($opcode,
         'op2_data_type' => __phpscan_replace_gettype($op2)
       );
       phpscan_log_op($op);
+
+      if ($opcode == 81)
+      {
+        global $__phpscan_variable_map;
+        $result = $op1[$op2]; // TODO temp fix, should get proper $result from Zend extension
+
+        $res_zval_id = phpscan_ext_get_zval_id($result);
+
+        // if (!__phpscan_replace_array_key_exists($res_zval_id, $__phpscan_variable_map))
+        {
+          // TODO move this whole php_scan_register into separate function (reuse @ taint hook)
+          $op1_id = phpscan_lookup_zval($op1);
+
+          if (!__phpscan_replace_array_key_exists($op2, $op1) || !__phpscan_replace_array_key_exists($res_zval_id, $__phpscan_variable_map))
+            $__phpscan_variable_map[$res_zval_id] = 'fetch_dim_r(' . $op1_id . ':' . $op2 .  ')';
+
+          $res_id = phpscan_lookup_zval($result);
+
+          phpscan_register_transform($res_id,
+                                    'fetch_dim_r',
+                                    array($op1_id),
+                                    array(
+                                      array('type' => 'symbolic', 'id' => $op1_id, 'value' => $op1),
+                                      array('type' => 'raw_value', 'value' => $op2)
+                                    ));
+
+        }
+      }
     }
   }
 }
@@ -160,8 +189,14 @@ function phpscan_separate_zval($var)
     $separated_var['__aa__'] = rand();
     unset($separated_var['__aa__']);
   }
-  else {
+  else if (is_string($separated_var)) {
     $separated_var .= '';
+  }
+  else if (is_integer($separated_var) || is_double($separated_var)) {
+    $separated_var *= 1;
+  }
+  else {
+    throw new Exception('Unable to separate zval for unknown type ' . gettype($separated_var));
   }
 
   return $separated_var;
@@ -209,6 +244,7 @@ function __phpscan_taint_hook($func, $args)
   global $__phpscan_variable_map;
   global $__phpscan_op_ignore;
   global $__phpscan_transform;
+  global $__phpscan_taint_hook;
 
   $__phpscan_op_ignore = true;
 
@@ -231,7 +267,7 @@ function __phpscan_taint_hook($func, $args)
     else
     {
       $args_symbolic[] = array(
-        'type' => 'var',
+        'type' => 'raw_value',
         'value' => $var
       );
     }
@@ -241,21 +277,36 @@ function __phpscan_taint_hook($func, $args)
 
   $res = __phpscan_replace_call_user_func_array($func, $args);
 
+  $short_func = __phpscan_replace_str_replace('__phpscan_replace_', '', $func);
+  if (__phpscan_replace_array_key_exists($short_func, $__phpscan_taint_hook))
+  {
+    $res = __phpscan_replace_call_user_func($__phpscan_taint_hook[$short_func], $res);
+  }
+
   if (__phpscan_replace_count($taint) > 0)
   {
     $res_zval_id = phpscan_ext_get_zval_id($res);
-    $__phpscan_variable_map[$res_zval_id] = 'transform(' . __phpscan_replace_implode(',', $taint) . ')';
-    $__phpscan_transform[$__phpscan_variable_map[$res_zval_id]] = array(
-      'function' => __phpscan_replace_str_replace('__phpscan_replace_', '', $func),
-      'ids' => $taint,
-      'args' => $args_symbolic
-    );
+    $__phpscan_variable_map[$res_zval_id] = $short_func . '(' . __phpscan_replace_implode(',', $taint) . ':' . __phpscan_replace_uniqid() . ')';
 
+    phpscan_register_transform($__phpscan_variable_map[$res_zval_id],
+                               $short_func,
+                               $taint,
+                               $args_symbolic);
   }
 
   $__phpscan_op_ignore = false;
 
   return $res;
+}
+
+function phpscan_register_transform($id, $func, $ids, $args)
+{
+  global $__phpscan_transform;
+  $__phpscan_transform[$id] = array(
+    'function' => $func,
+    'ids' => $ids,
+    'args' => $args
+  );
 }
 
 
@@ -279,7 +330,20 @@ function phpscan_replace_internals()
 
 
 
+function phpscan_explode_taint_hook($res) // TODO should res be a reference?
+{
+  // Fixes testcase test_explode
+  // If explode is called on a string that does not contain the split string $res[0] will point to the
+  // same zval as the original string. Explictly separate them such that we can track $res[0] separately.
+  if (__phpscan_replace_count($res) == 1)
+  {
+    $res[0] = phpscan_separate_zval($res[0]);
+  }
 
+  return $res;
+}
+
+$__phpscan_taint_hook['explode'] = 'phpscan_explode_taint_hook';
 
 
 ?>

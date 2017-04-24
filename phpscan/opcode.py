@@ -1,7 +1,7 @@
 from enum import Enum
 
 # See Zend/zend_vm_opcodes.h for original definition
-zend_opcode_list = [
+ZEND_OPCODE_LIST = [
     'ZEND_NOP',  # 0
     'ZEND_ADD',  # 1
     'ZEND_SUB',  # 2
@@ -192,7 +192,7 @@ zend_opcode_list = [
 ]
 
 
-zend_opcode_lookup = {opcode_name: opcode for opcode, opcode_name in enumerate(zend_opcode_list)}
+ZEND_OPCODE_LOOKUP = {opcode_name: opcode for opcode, opcode_name in enumerate(ZEND_OPCODE_LIST)}
 
 
 # See Zend/zend_compile.h for original definition
@@ -203,16 +203,16 @@ class OperandType(Enum):
     UNUSED = 1 << 3
     CV = 1 << 4
 
-optype_lookup = {optype.value: optype for optype in list(OperandType)}
+OPTYPE_LOOKUP = {optype.value: optype for optype in list(OperandType)}
 
 
-class Operand:
+class Operand(object):
 
-    def __init__(self, id, type, data_type, value):
-        self.id = id
-        self.type = optype_lookup[type]
-        self.data_type = data_type
-        self.value = value
+    def __init__(self, var_id, type, data_type, value):
+        self._id = var_id
+        self._type = OPTYPE_LOOKUP[type]
+        self._data_type = data_type
+        self._value = value
 
     @property
     def id(self):
@@ -224,12 +224,12 @@ class Operand:
 
     @property
     def value(self):
-        value_typed = value
+        value_typed = self._value
 
         if self.data_type == 'string':
             pass
         elif self.data_type == 'integer':
-            value_typed = int(value)
+            value_typed = int(value_typed)
         # elif self.data_type == 'double':
         #   value_typed = float(value_typed)
         else:
