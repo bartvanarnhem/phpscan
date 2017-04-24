@@ -6,10 +6,22 @@
 
 #define OP_PHP_CALLBACK_FUNCTION "phpscan_ext_opcode_handler"
 
+long debug_zval(zval* val);
+
 long zval_to_id(zval* val)
 {
-  long id = (long)&val->value.zv->value;
-  return id;
+    long id = (long)&val->value.zv->value;
+    // debug_zval(val);
+    return id;
+}
+
+long debug_zval(zval* val)
+{
+    printf("zval %lu\n", (long)&val);
+    printf("zval->value %lu\n", (long)&val->value);
+    printf("zval->value.zv %lu\n", (long)&val->value.zv);
+    printf("zval->value.ptr %lu\n", (long)&val->value.ptr);
+    printf("zval->value.zv->value %lu\n", (long)&val->value.zv->value);
 }
 
 int in_callback = 0;
@@ -40,18 +52,23 @@ static void trigger_op_php_callback(zend_uchar opcode,
         zval resulttype_zval;
         ZVAL_LONG(&resulttype_zval, resulttype);
 
-
         params[0] = opcode_zval;
         params[1] = *op1;
         params[2] = op1type_zval;
         params[3] = *op2;
         params[4] = op2type_zval;
+
         // TODO: looks like result can be unitialized even though type != IS_UNUSED... use NULL for now
         if (result)
+        {
             ZVAL_NULL(&params[5]);
             // params[5] = *result;
+        }
         else
+        {
             ZVAL_NULL(&params[5]);
+        }
+
         params[6] = resulttype_zval;
 
         zval return_value;
@@ -110,6 +127,7 @@ static int common_override_handler(zend_execute_data *execute_data)
     zval* op2 = get_zval(execute_data, opline->op2_type, &opline->op2, &is_var);
     zval* result = get_zval(execute_data, opline->result_type, &opline->result, &is_var);
 
+
     trigger_op_php_callback(opline->opcode,
                             op1, opline->op1_type,
                             op2, opline->op2_type,
@@ -127,6 +145,7 @@ void register_handler(zend_uchar opcode)
 PHP_MINIT_FUNCTION(phpscan)
 {
     register_handler(ZEND_IS_EQUAL);
+    register_handler(ZEND_IS_NOT_EQUAL);
     register_handler(ZEND_IS_IDENTICAL);
 
     register_handler(ZEND_ISSET_ISEMPTY_DIM_OBJ);
