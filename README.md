@@ -74,7 +74,7 @@ _REQUEST
 ```
 $ sudo apt-get install php7.1-cli
 ```
-#### Build Runkit7 extension
+#### Runkit7
 Build the unofficial PHP7 runkit fork according to the instructions at https://github.com/TysonAndre/runkit7#building-and-installing-runkit7-in-unix
 
 To enable Runkit7 and allow overriding of internal PHP functions add the following lines to your php.ini configuration file:
@@ -83,6 +83,14 @@ To enable Runkit7 and allow overriding of internal PHP functions add the followi
 extension=runkit.so
 runkit.internal_override=On
 ```
+
+#### Z3
+Build Z3 and the Z3 Python bindings as per instructions on https://github.com/Z3Prover/z3. Make sure the &lt;z3-builddir&gt;/python path is added to your PYTHONPATH enivoronment variable:
+
+```
+$ export PYTHONPATH="<z3-builddir>/python:${PYTHONPATH}"
+```
+
 
 ### Download latest PHPScan
 ```
