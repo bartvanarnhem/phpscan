@@ -50,4 +50,16 @@ def test_substring():
 def test_negate():
     scan = init_and_run_simple_scan("if (!($a == 'value')) phpscan_flag('flag');")
     assert scan.has_reached_case('flag')
-    
+
+def test_explode():
+    script = """
+        $a = explode('.', $_GET['var']);
+        $class = $a[0];
+        $action = $a[1];
+
+        if (($class == 'auth') && ($action == 'login')) {
+            phpscan_flag('flag');
+        }
+        """
+    scan = init_and_run_simple_scan(script)
+    assert scan.has_reached_case('flag')
