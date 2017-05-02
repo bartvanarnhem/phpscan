@@ -1,5 +1,7 @@
 <?php
 
+require_once 'zend_opcodes.php';
+
 register_shutdown_function('phpscan_handle_shutdown');
 
 $__phpscan_variable_map = array();
@@ -18,24 +20,62 @@ function phpscan_ext_opcode_handler($opcode,
 {
   global $__phpscan_init_complete;
   global $__phpscan_op_ignore;
+  global $__phpscan_variable_map;
 
   if (!$__phpscan_op_ignore && $__phpscan_init_complete)
   {
-    if ($opcode === 38)
+    $__phpscan_op_ignore = true;
+
+    if ($opcode === ZendOpcodes::ZEND_ASSIGN)
     {
-      $op = array(
-        'opcode' => $opcode,
+      $op1_zval_id = phpscan_ext_get_zval_id($op1);
+      $op2_zval_id = phpscan_ext_get_zval_id($op2);
 
-        'op1_value' => $op1,
-        'op1_id' => phpscan_lookup_zval($op1),
-        'op1_type' => $op1type,
-        'op1_data_type' => __phpscan_replace_gettype($op1),
+      if (($op1_zval_id > 0) && phpscan_is_tracking($op2_zval_id) && ($op1_zval_id !== $op2_zval_id))
+      {
+        $op1_id = phpscan_lookup_zval($op1);
+        $op2_id = phpscan_lookup_zval($op2);
 
-        'op2_value' => $op2,
-        'op2_id' => phpscan_lookup_zval($op2),
-        'op2_type' => $op2type,
-        'op2_data_type' => __phpscan_replace_gettype($op2)
-      );
+        $__phpscan_variable_map[$op1_id] = 'assign(' . $op2_id . ':' . __phpscan_replace_uniqid() . ')';
+
+        phpscan_register_transform($op1_id,
+                                  'assign',
+                                  array($op2_id),
+                                  array(
+                                    array('type' => 'symbolic', 'id' => $op2_id, 'value' => $op2)
+                                  ));
+      }
+    }
+    else if (($opcode === ZendOpcodes::ZEND_ADD) || ($opcode === ZendOpcodes::ZEND_CONCAT))
+    {
+      $op1_zval_id = phpscan_ext_get_zval_id($op1);
+      $op2_zval_id = phpscan_ext_get_zval_id($op2);
+
+      if (phpscan_is_tracking($op1_zval_id) || phpscan_is_tracking($op2_zval_id))
+      {
+        $op1_id = phpscan_lookup_zval($op1);
+        $op2_id = phpscan_lookup_zval($op2);
+        $result_id = phpscan_lookup_zval($result);
+
+        $functions = array(1 => 'add', 8 => 'concat');
+
+        $args = array();
+        if (phpscan_is_tracking($op1_zval_id))
+          $args[] = array('type' => 'symbolic', 'id' => $op1_id, 'value' => $op1);
+        else
+          $args[] = array('type' => 'raw_value', 'value' => $op1);
+
+        if (phpscan_is_tracking($op2_zval_id))
+          $args[] = array('type' => 'symbolic', 'id' => $op2_id, 'value' => $op2);
+        else
+          $args[] = array('type' => 'raw_value', 'value' => $op2);
+        
+        phpscan_register_transform($result_id,
+                                  $functions[$opcode],
+                                  array($op1_id, $op2_id),
+                                  $args);
+      }
+
     }
     else
     {
@@ -54,11 +94,8 @@ function phpscan_ext_opcode_handler($opcode,
       );
       phpscan_log_op($op);
 
-      if ($opcode == 81)
+      if ($opcode == ZendOpcodes::ZEND_FETCH_DIM_R)
       {
-        global $__phpscan_variable_map;
-        $result = $op1[$op2]; // TODO temp fix, should get proper $result from Zend extension
-
         $res_zval_id = phpscan_ext_get_zval_id($result);
 
         // if (!__phpscan_replace_array_key_exists($res_zval_id, $__phpscan_variable_map))
@@ -82,6 +119,8 @@ function phpscan_ext_opcode_handler($opcode,
         }
       }
     }
+
+    $__phpscan_op_ignore = false;
   }
 }
 
@@ -102,6 +141,7 @@ function phpscan_initialize_environment($state)
   global $__phpscan_init_complete;
 
   $state_decoded = json_decode($state);
+  var_dump('SETTING STATE', $state_decoded);
 
   foreach ($state_decoded as $var_name => $var_info)
   {
@@ -126,6 +166,12 @@ function phpscan_register_zval($var, $var_info)
   $__phpscan_variable_map[$var_zval_id] = $var_info->id;
 }
 
+function phpscan_is_tracking($var_zval_id)
+{
+  global $__phpscan_variable_map;
+  return __phpscan_replace_array_key_exists($var_zval_id, $__phpscan_variable_map);
+}
+
 function phpscan_lookup_zval($var)
 {
   global $__phpscan_variable_map;
@@ -136,7 +182,7 @@ function phpscan_lookup_zval($var)
   $__phpscan_op_ignore = true;
   $var_id = 'untracked (zval_id=' . $var_zval_id .')';
   // TODO __phpscan_replace should not be necessary here
-  if (__phpscan_replace_array_key_exists($var_zval_id, $__phpscan_variable_map))
+  if (phpscan_is_tracking($var_zval_id))
   {
     $var_id = $__phpscan_variable_map[$var_zval_id];
   }

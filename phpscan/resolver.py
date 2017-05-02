@@ -67,6 +67,18 @@ class SubstrResolver(TransformResolver):
             'args': args
         }
 
+class DirectProxyResolver(TransformResolver):
+    def resolve(self, data_type, args):
+        if args[0]['type'] == 'symbolic' and args[1]['type'] == 'raw_value':
+            self._resolver._state.update_guessed_type_from_value(args[0]['id'], args[1]['value'])
+        if args[1]['type'] == 'symbolic' and args[0]['type'] == 'raw_value':
+            self._resolver._state.update_guessed_type_from_value(args[1]['id'], args[0]['value'])
+
+        return {
+            'type': self._name,
+            'args': args
+        }
+
 class FetchDimResolver(TransformResolver):
     def resolve(self, data_type, args):
         (var_arg, idx_arg) = args
@@ -92,5 +104,7 @@ class FetchDimResolver(TransformResolver):
 
 RESOLVERS = [
     ('substr', SubstrResolver),
+    ('concat', DirectProxyResolver),
+    ('add', DirectProxyResolver),
     ('fetch_dim_r', FetchDimResolver)
 ]

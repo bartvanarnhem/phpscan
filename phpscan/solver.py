@@ -61,6 +61,8 @@ class Solver(object):
             return value.as_string()[1:-1].replace('\\x00', '?')
         elif z3.is_int(value):
             return value.as_long()
+        elif value is None:
+            return '' # TODO adhere to type
         else:
             raise ValueError('Got unknown Z3 type')
 
@@ -115,6 +117,21 @@ class ExtractAdapter(Z3Adapter):
         return z3.Extract(self._solver.solve_rec(args[0]), self._solver.solve_rec(args[1]),
                           self._solver.solve_rec(args[2]))
 
+
+class ConcatAdapter(Z3Adapter):
+    def adapt(self, condition):
+        args = condition['args']
+        return z3.Concat(self._solver.solve_rec(args[0]), self._solver.solve_rec(args[1]))
+
+class AddAdapter(Z3Adapter):
+    def adapt(self, condition):
+        args = condition['args']
+        
+        return self._solver.solve_rec(args[0]) + self._solver.solve_rec(args[1])
+
+        return a1 + a2
+
+
 class BaseVarAdapter(Z3Adapter):
     def adapt(self, condition):
         return self._solver._base_var[condition['id']]
@@ -152,6 +169,8 @@ ADAPTERS = [
     ('smaller', SmallerAdapter),
     ('greater', GreaterAdapter),
     ('extract', ExtractAdapter),
+    ('concat', ConcatAdapter),
+    ('add', AddAdapter),
     ('base_var', BaseVarAdapter),
     ('raw_value', RawValueAdapter),
     ('explode', ExplodeAdapter)

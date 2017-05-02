@@ -96,18 +96,7 @@ class OpcodeHandler:
         self.satisfier.start_state.conditions.append(r)
 
     def update_guessed_type_from_value(self, var_id, value):
-        if self.satisfier.start_state.is_tracking(var_id):
-            var = self.satisfier.start_state.get_var_ref(var_id)
-
-            if isinstance(value, int) and var['type'] != 'integer':
-                var['type'] = 'integer'
-                try:
-                    var['value'] = int(var['value'])
-                except ValueError:
-                    logger.log('Got op type hint for integer but could not cast %s to int.' %
-                            var['value'], '', Logger.DEBUG)
-
-                    var['value'] = 0
+        self.satisfier.start_state.update_guessed_type_from_value(var_id, value)
 
     @property
     def opcode(self):
