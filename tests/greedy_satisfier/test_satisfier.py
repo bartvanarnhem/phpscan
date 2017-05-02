@@ -63,3 +63,27 @@ def test_explode():
         """
     scan = init_and_run_simple_scan(script)
     assert scan.has_reached_case('flag')
+
+def test_concat():
+    script = """
+        $a = $_GET['var'];
+        $b = $a . 'lue';
+
+        if ($b === 'value') {
+            phpscan_flag('flag');
+        }
+        """
+    scan = init_and_run_simple_scan(script)
+    assert scan.has_reached_case('flag')
+
+def test_add():
+    script = """
+        $a = $_GET['var'];
+        $b = $a + 7;
+
+        if ($b === 10) {
+            phpscan_flag('flag');
+        }
+        """
+    scan = init_and_run_simple_scan(script)
+    assert scan.has_reached_case('flag')
