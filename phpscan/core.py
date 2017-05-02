@@ -150,6 +150,19 @@ class State(object):
     def get_annotated_var_ref(self, var_id):
         return self._annotated_lookup_map[var_id]
 
+    def update_guessed_type_from_value(self, var_id, value):
+        if self.is_tracking(var_id):
+            var = self.get_var_ref(var_id)
+
+            if isinstance(value, int) and var['type'] != 'integer':
+                var['type'] = 'integer'
+                try:
+                    var['value'] = int(var['value'])
+                except ValueError:
+                    logger.log('Got op type hint for integer but could not cast %s to int.' %
+                            var['value'], '', Logger.DEBUG)
+
+                    var['value'] = 0
 
     def annotate(self):
         self._lookup_map = dict()
