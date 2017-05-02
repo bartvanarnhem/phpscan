@@ -126,10 +126,8 @@ class ConcatAdapter(Z3Adapter):
 class AddAdapter(Z3Adapter):
     def adapt(self, condition):
         args = condition['args']
-        
-        return self._solver.solve_rec(args[0]) + self._solver.solve_rec(args[1])
 
-        return a1 + a2
+        return self._solver.solve_rec(args[0]) + self._solver.solve_rec(args[1])
 
 
 class BaseVarAdapter(Z3Adapter):

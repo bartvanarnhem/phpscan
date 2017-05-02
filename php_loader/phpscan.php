@@ -36,7 +36,7 @@ function phpscan_ext_opcode_handler($opcode,
         $op1_id = phpscan_lookup_zval($op1);
         $op2_id = phpscan_lookup_zval($op2);
 
-        $__phpscan_variable_map[$op1_id] = 'assign(' . $op2_id . ':' . __phpscan_replace_uniqid() . ')';
+        $__phpscan_variable_map[$op1_zval_id] = 'assign(' . $op2_id . ':' . __phpscan_replace_uniqid() . ')';
 
         phpscan_register_transform($op1_id,
                                   'assign',
@@ -50,14 +50,16 @@ function phpscan_ext_opcode_handler($opcode,
     {
       $op1_zval_id = phpscan_ext_get_zval_id($op1);
       $op2_zval_id = phpscan_ext_get_zval_id($op2);
+      $res_zval_id = phpscan_ext_get_zval_id($result);
 
       if (phpscan_is_tracking($op1_zval_id) || phpscan_is_tracking($op2_zval_id))
       {
         $op1_id = phpscan_lookup_zval($op1);
         $op2_id = phpscan_lookup_zval($op2);
-        $result_id = phpscan_lookup_zval($result);
 
         $functions = array(1 => 'add', 8 => 'concat');
+
+        $func_name = $functions[$opcode];
 
         $args = array();
         if (phpscan_is_tracking($op1_zval_id))
@@ -69,9 +71,19 @@ function phpscan_ext_opcode_handler($opcode,
           $args[] = array('type' => 'symbolic', 'id' => $op2_id, 'value' => $op2);
         else
           $args[] = array('type' => 'raw_value', 'value' => $op2);
-        
+
+        $symbolic_args = array();
+        foreach ($args as $arg) {
+          if ($arg['type'] === 'symbolic')
+            $symbolic_args[] = $arg['id'];
+        }
+
+        $__phpscan_variable_map[$res_zval_id] = $func_name . '(' . implode(';', $symbolic_args) . ';' . __phpscan_replace_uniqid() . ')';
+        $result_id = phpscan_lookup_zval($result);
+
+
         phpscan_register_transform($result_id,
-                                  $functions[$opcode],
+                                  $func_name,
                                   array($op1_id, $op2_id),
                                   $args);
       }
