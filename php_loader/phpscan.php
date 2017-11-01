@@ -11,8 +11,6 @@ $__phpscan_op_ignore = false;
 $__phpscan_op = array();
 $__phpscan_taint_hook = array();
 
-
-
 function phpscan_ext_opcode_handler($opcode, 
                   $op1, $op1type,
                   $op2, $op2type,
@@ -108,10 +106,12 @@ function phpscan_ext_opcode_handler($opcode,
 
       if ($opcode == ZendOpcodes::ZEND_FETCH_DIM_R)
       {
-        $res_zval_id = phpscan_ext_get_zval_id($result);
+        $op1_zval_id = phpscan_ext_get_zval_id($op1);
 
         // if (!__phpscan_replace_array_key_exists($res_zval_id, $__phpscan_variable_map))
+        if (phpscan_is_tracking($op1_zval_id))
         {
+          $res_zval_id = phpscan_ext_get_zval_id($result);
           // TODO move this whole php_scan_register into separate function (reuse @ taint hook)
           $op1_id = phpscan_lookup_zval($op1);
 
@@ -402,6 +402,5 @@ function phpscan_explode_taint_hook($res) // TODO should res be a reference?
 }
 
 $__phpscan_taint_hook['explode'] = 'phpscan_explode_taint_hook';
-
 
 ?>
