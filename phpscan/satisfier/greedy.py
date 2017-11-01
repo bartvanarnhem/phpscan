@@ -95,9 +95,12 @@ SATISFIER_HANDLERS = [
     ('ZEND_IS_EQUAL', IsEqualHandler),
     ('ZEND_IS_IDENTICAL', IsEqualHandler),
     ('ZEND_IS_NOT_EQUAL', IsNotEqualHandler),
+    ('ZEND_CASE', IsEqualHandler),
 
     ('ZEND_ISSET_ISEMPTY_DIM_OBJ', UninitializedPropertyAccessHandler),
     ('ZEND_FETCH_DIM_R', UninitializedPropertyAccessHandler),
+    ('ZEND_FETCH_DIM_FUNC_ARG', UninitializedPropertyAccessHandler),
+
 
     ('ZEND_IS_SMALLER', IsSmallerHandler),
     ('ZEND_IS_SMALLER_OR_EQUAL', IsSmallerHandler)
