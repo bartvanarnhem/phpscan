@@ -20,6 +20,9 @@ INITIAL_STATE = {
     },
     '_COOKIE': {
         'type': 'array'
+    },
+    '_FILES': {
+        'type': 'array'
     }
 }
 
