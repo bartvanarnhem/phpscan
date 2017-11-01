@@ -8,7 +8,11 @@
 
 long zval_to_id(zval* val)
 {
-    long id = (long)&val->value.zv->value;
+    long id = -1;
+    if (val->u1.v.type != IS_UNDEF)
+    {
+        id = (long)&val->value.zv->value;
+    }
     return id;
 }
 
@@ -16,7 +20,8 @@ int in_callback = 0;
 static void trigger_op_php_callback(zend_uchar opcode, 
                                     zval* op1, zend_uchar op1type, 
                                     zval* op2, zend_uchar op2type,
-                                    zval* result, zend_uchar resulttype)
+                                    zval* result, zend_uchar resulttype,
+                                    int use_result)
 {
     if (!in_callback)
     {
@@ -46,8 +51,9 @@ static void trigger_op_php_callback(zend_uchar opcode,
         params[3] = *op2;
         params[4] = op2type_zval;
 
+
         // TODO: looks like result can be unitialized even though type != IS_UNUSED... use NULL for now
-        if (&result->value != 0)
+        if (use_result && (result->u1.v.type != IS_UNDEF) && (&result->value != 0))
         {
             params[5] = *result;
         }
@@ -105,7 +111,7 @@ zval *get_zval(zend_execute_data *zdata, int node_type, const znode_op *node, in
 }
 
 struct OplineLag {
-    zend_execute_data* exec_data;
+    zend_op *opline;
     zend_uchar opcode;
     zval* op1;
     zend_uchar op1_type;
@@ -130,17 +136,24 @@ static int common_override_handler(zend_execute_data *execute_data)
         trigger_op_php_callback(lag.opcode,
                                 lag.op1, lag.op1_type,
                                 lag.op2, lag.op2_type,
-                                lag.result, lag.result_type
+                                lag.result, lag.result_type,
+                                1
                                 );
     }
 
     zval* op1 = get_zval(execute_data, opline->op1_type, &opline->op1, &is_var);
     zval* op2 = get_zval(execute_data, opline->op2_type, &opline->op2, &is_var);
-    zval* result = get_zval(execute_data, opline->result_type, &opline->result, &is_var);
+    zval *t = EX_VAR(opline->result.var);
+
+    int rtype = opline->result_type;
+    // if ((Z_TYPE_P(t) == IS_REFERENCE) && (opline->result_type == IS_TMP_VAR))
+    //     rtype = IS_VAR;
+
+    zval* result = get_zval(execute_data, rtype, &opline->result, &is_var);
 
     if ((opline->opcode == ZEND_ADD) || (opline->opcode == ZEND_CONCAT) || (opline->opcode == ZEND_FETCH_DIM_R))
     {
-        lag.exec_data = execute_data;
+        lag.opline = opline;
         lag.opcode = opline->opcode;
         lag.op1 = op1;
         lag.op1_type = opline->op1_type;
@@ -155,7 +168,8 @@ static int common_override_handler(zend_execute_data *execute_data)
         trigger_op_php_callback(opline->opcode,
                                 op1, opline->op1_type,
                                 op2, opline->op2_type,
-                                result, opline->result_type
+                                result, opline->result_type,
+                                0
                                 );
     }
 
@@ -172,9 +186,11 @@ PHP_MINIT_FUNCTION(phpscan)
     register_handler(ZEND_IS_EQUAL);
     register_handler(ZEND_IS_NOT_EQUAL);
     register_handler(ZEND_IS_IDENTICAL);
+    register_handler(ZEND_CASE);
 
     register_handler(ZEND_ISSET_ISEMPTY_DIM_OBJ);
     register_handler(ZEND_FETCH_DIM_R);
+    register_handler(ZEND_FETCH_DIM_FUNC_ARG);
 
     register_handler(ZEND_IS_SMALLER);
     register_handler(ZEND_IS_SMALLER_OR_EQUAL);
