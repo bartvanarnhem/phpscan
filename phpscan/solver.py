@@ -38,23 +38,28 @@ class Solver(object):
                 logger.log('Ignoring unknown type %s while passing to Z3' %
                            var['type'], '', Logger.DEBUG)
 
-        for condition in conditions:
-            solver.add(self.solve_rec(condition))
+        z3_solved = False
 
+        try:
+            for condition in conditions:
+                solver.add(self.solve_rec(condition))
 
+            solve_result = solver.check()
+            logger.log('SOLVER RESULT', solve_result, Logger.PROGRESS)
 
-        solve_result = solver.check()
-        logger.log('SOLVER RESULT', solve_result, Logger.PROGRESS)
+            if solve_result == z3.sat:
+                z3_solved = True
+                model = solver.model()
+                logger.log('SOLVER MODEL', model, Logger.PROGRESS)
 
-        if solve_result == z3.sat:
-            model = solver.model()
-            logger.log('SOLVER MODEL', model, Logger.PROGRESS)
+                for var_id, var in self._base_var.iteritems():
+                    var_ref = self._state.get_var_ref(var_id)
+                    var_ref['value'] = self.get_z3_value(model[var])
+        except z3.z3types.Z3Exception as e:
+            print 'Got Z3Exception: %s' % str(e)
 
-            for var_id, var in self._base_var.iteritems():
-                var_ref = self._state.get_var_ref(var_id)
-                var_ref['value'] = self.get_z3_value(model[var])
-        else:
-            raise Exception('SOLVER COULD NOT SOLVE CONDITIONS')
+        # else:
+        #     raise Exception('SOLVER COULD NOT SOLVE CONDITIONS')
 
     def get_z3_value(self, value):
         if z3.is_string(value):
@@ -129,6 +134,12 @@ class AddAdapter(Z3Adapter):
 
         return self._solver.solve_rec(args[0]) + self._solver.solve_rec(args[1])
 
+class AssignAdapter(Z3Adapter):
+    def adapt(self, condition):
+        args = condition['args']
+
+        return self._solver.solve_rec(args[0])
+
 
 class BaseVarAdapter(Z3Adapter):
     def adapt(self, condition):
@@ -171,6 +182,7 @@ ADAPTERS = [
     ('add', AddAdapter),
     ('base_var', BaseVarAdapter),
     ('raw_value', RawValueAdapter),
+    ('assign', AssignAdapter),
     ('explode', ExplodeAdapter)
 ]
 

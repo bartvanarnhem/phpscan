@@ -67,6 +67,13 @@ class SubstrResolver(TransformResolver):
             'args': args
         }
 
+class AssignResolver(TransformResolver):
+    def resolve(self, data_type, args):
+        return {
+            'type': 'assign',
+            'args': args
+        }
+
 class DirectProxyResolver(TransformResolver):
     def resolve(self, data_type, args):
         if args[0]['type'] == 'symbolic' and args[1]['type'] == 'raw_value':
@@ -106,5 +113,6 @@ RESOLVERS = [
     ('substr', SubstrResolver),
     ('concat', DirectProxyResolver),
     ('add', DirectProxyResolver),
+    ('assign', AssignResolver),
     ('fetch_dim_r', FetchDimResolver)
 ]
