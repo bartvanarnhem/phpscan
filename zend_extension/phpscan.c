@@ -9,13 +9,15 @@
 long zval_to_id(zval* val)
 {
     long id = -1;
-    if (val->u1.v.type != IS_UNDEF)
+    if (Z_TYPE_P(val) == IS_REFERENCE)
     {
-        id = (long)&val->value.zv->value;
+        id = val->value.zv;
     }
+
     return id;
 }
 
+int ignore_op = 0;
 int in_callback = 0;
 static void trigger_op_php_callback(zend_uchar opcode, 
                                     zval* op1, zend_uchar op1type, 
@@ -23,10 +25,10 @@ static void trigger_op_php_callback(zend_uchar opcode,
                                     zval* result, zend_uchar resulttype,
                                     int use_result)
 {
-    if (!in_callback)
+    if (!in_callback && !ignore_op)
     {
         zval* params = NULL;
-        uint param_count = 7;
+        uint param_count = 10;
 
         params = safe_emalloc(sizeof(zval), param_count, 0);
 
@@ -39,30 +41,42 @@ static void trigger_op_php_callback(zend_uchar opcode,
         zval op1type_zval;
         ZVAL_LONG(&op1type_zval, op1type);
 
+        zval op1id_zval;
+        ZVAL_LONG(&op1id_zval, zval_to_id(op1));
+        
         zval op2type_zval;
         ZVAL_LONG(&op2type_zval, op2type);
+
+        zval op2id_zval;
+        ZVAL_LONG(&op2id_zval, zval_to_id(op2));
 
         zval resulttype_zval;
         ZVAL_LONG(&resulttype_zval, resulttype);
 
         params[0] = opcode_zval;
         params[1] = *op1;
-        params[2] = op1type_zval;
-        params[3] = *op2;
-        params[4] = op2type_zval;
-
-
+        params[2] = op1id_zval;
+        params[3] = op1type_zval;
+        params[4] = *op2;
+        params[5] = op2id_zval;
+        params[6] = op2type_zval;
+            
         // TODO: looks like result can be unitialized even though type != IS_UNUSED... use NULL for now
+        zval resultid_zval;
         if (use_result && (result->u1.v.type != IS_UNDEF) && (&result->value != 0))
         {
-            params[5] = *result;
+            params[7] = *result;
+            ZVAL_LONG(&resultid_zval, zval_to_id(result));
         }
         else
         {
-            ZVAL_NULL(&params[5]);
+            ZVAL_NULL(&params[7]);
+            ZVAL_LONG(&resultid_zval, -1);
         }
 
-        params[6] = resulttype_zval;
+
+        params[8] = resultid_zval;
+        params[9] = resulttype_zval;
 
         zval return_value;
 
@@ -82,7 +96,7 @@ static void trigger_op_php_callback(zend_uchar opcode,
     }
     else
     {
-        printf("Warning: ignoring opcode %d while already in callback to prevent infinite recursion.\n", opcode);
+        // printf("Warning: ignoring opcode %d while already in callback to prevent infinite recursion.\n", opcode);
     }
 }
 
@@ -90,6 +104,17 @@ PHP_FUNCTION(phpscan_enabled)
 {
   RETURN_BOOL(1);
 }
+
+PHP_FUNCTION(phpscan_ext_ignore_op)
+{
+    ignore_op = 1;
+}
+
+PHP_FUNCTION(phpscan_ext_ignore_op_off)
+{
+    ignore_op = 0;
+}
+
 
 PHP_FUNCTION(phpscan_ext_get_zval_id)
 {
@@ -122,6 +147,23 @@ struct OplineLag {
     int pending;
 };
 
+void force_ref(zval *val) {
+    if (!Z_ISREF_P(val) && 
+        (Z_TYPE_P(val) != IS_INDIRECT) && 
+        (Z_TYPE_P(val) != IS_CONSTANT) && 
+        (Z_TYPE_P(val) != IS_CONSTANT_AST))
+    {
+        if (Z_TYPE_P(val) == IS_UNDEF) {
+			ZVAL_NEW_EMPTY_REF(val);
+			Z_SET_REFCOUNT_P(val, 2);
+			ZVAL_NULL(Z_REFVAL_P(val));
+        }
+        else {
+            ZVAL_MAKE_REF(val);
+        }
+    }
+}
+
 static int common_override_handler(zend_execute_data *execute_data)
 {
     const zend_op *opline = execute_data->opline;
@@ -141,37 +183,25 @@ static int common_override_handler(zend_execute_data *execute_data)
                                 );
     }
 
+
+    if (opline->opcode == ZEND_ASSIGN)
+    {
+        if (Z_TYPE_P(EX_VAR(opline->op1.var)) == IS_UNDEF)
+        {
+            force_ref(EX_VAR(opline->op1.var));
+        }
+    }
+
     zval* op1 = get_zval(execute_data, opline->op1_type, &opline->op1, &is_var);
     zval* op2 = get_zval(execute_data, opline->op2_type, &opline->op2, &is_var);
-    zval *t = EX_VAR(opline->result.var);
+    zval* result = get_zval(execute_data, opline->result_type, &opline->result, &is_var);
 
-    int rtype = opline->result_type;
-    // if ((Z_TYPE_P(t) == IS_REFERENCE) && (opline->result_type == IS_TMP_VAR))
-    //     rtype = IS_VAR;
-
-    zval* result = get_zval(execute_data, rtype, &opline->result, &is_var);
-
-    if ((opline->opcode == ZEND_ADD) || (opline->opcode == ZEND_CONCAT) || (opline->opcode == ZEND_FETCH_DIM_R))
-    {
-        lag.opline = opline;
-        lag.opcode = opline->opcode;
-        lag.op1 = op1;
-        lag.op1_type = opline->op1_type;
-        lag.op2 = op2;
-        lag.op2_type = opline->op2_type;
-        lag.result = result;
-        lag.result_type = opline->result_type;
-        lag.pending = 1;
-    }
-    else
-    {
-        trigger_op_php_callback(opline->opcode,
-                                op1, opline->op1_type,
-                                op2, opline->op2_type,
-                                result, opline->result_type,
-                                0
-                                );
-    }
+    trigger_op_php_callback(opline->opcode,
+                            op1, opline->op1_type,
+                            op2, opline->op2_type,
+                            result, opline->result_type,
+                            0
+                            );
 
     return ZEND_USER_OPCODE_DISPATCH;
 }
@@ -204,9 +234,16 @@ PHP_MINIT_FUNCTION(phpscan)
 }
 
 
+ZEND_BEGIN_ARG_INFO_EX(arginfo_phpscan_ext_get_zval_id, 0, 0, 3)
+    ZEND_ARG_INFO(1, var)
+ZEND_END_ARG_INFO();
+
+
 zend_function_entry phpscan_functions[] = {
     PHP_FE(phpscan_enabled, NULL)
-    PHP_FE(phpscan_ext_get_zval_id, NULL)
+    PHP_FE(phpscan_ext_get_zval_id, arginfo_phpscan_ext_get_zval_id)
+    PHP_FE(phpscan_ext_ignore_op, NULL)
+    PHP_FE(phpscan_ext_ignore_op_off, NULL)
     {NULL, NULL, NULL}
 };
  

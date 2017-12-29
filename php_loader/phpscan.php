@@ -4,17 +4,30 @@ require_once 'zend_opcodes.php';
 
 register_shutdown_function('phpscan_handle_shutdown');
 
+phpscan_ext_ignore_op();
+$_rGET = array(); $_GET = &$_rGET;
+$_rPOST = array(); $_POST = &$_rPOST;
+$_rFILES = array(); $_FILES = &$_rFILES;
+$_rCOOKIES = array(); $_COOKIES = &$_rCOOKIES;
+$_rREQUEST = array(); $_REQUEST = &$_rREQUEST;
+
 $__phpscan_variable_map = array();
 $__phpscan_transform = array();
 $__phpscan_init_complete = false;
 $__phpscan_op_ignore = false;
 $__phpscan_op = array();
 $__phpscan_taint_hook = array();
+$__phpscan_var_id_lookup = array();
+phpscan_ext_ignore_op_off();
+
+function phpscan_var_id(&$var) {
+    return phpscan_ext_get_zval_id($var);
+}
 
 function phpscan_ext_opcode_handler($opcode, 
-                  $op1, $op1type,
-                  $op2, $op2type,
-                  $result, $resulttype)
+                  $op1, $op1_zval_id, $op1_type,
+                  $op2, $op2_zval_id, $op2_type,
+                  $result, $result_zval_id, $resulttype)
 {
   global $__phpscan_init_complete;
   global $__phpscan_op_ignore;
@@ -22,20 +35,20 @@ function phpscan_ext_opcode_handler($opcode,
 
   if (!$__phpscan_op_ignore && $__phpscan_init_complete)
   {
+    $op1_id = phpscan_lookup_zval_by_id($op1_zval_id);
+    $op2_id = phpscan_lookup_zval_by_id($op2_zval_id);
+
+    phpscan_ext_ignore_op();
     $__phpscan_op_ignore = true;
 
     if ($opcode === ZendOpcodes::ZEND_ASSIGN)
     {
-      $op1_zval_id = phpscan_ext_get_zval_id($op1);
-      $op2_zval_id = phpscan_ext_get_zval_id($op2);
-
       if (($op1_zval_id > 0) && phpscan_is_tracking($op2_zval_id) && ($op1_zval_id !== $op2_zval_id))
       {
-        $op1_id = phpscan_lookup_zval($op1);
-        $op2_id = phpscan_lookup_zval($op2);
-
-        $__phpscan_variable_map[$op1_zval_id] = 'assign(' . $op2_id . ':' . __phpscan_replace_uniqid() . ')';
-
+        $__phpscan_variable_map[$op1_zval_id] = 'assign(' . $op2_id . ':' . __phpscan_replace_uniqid('', true) . ')';
+        // TODO do we really need to reassign here?
+        $op1_id = phpscan_lookup_zval_by_id($op1_zval_id);
+        
         phpscan_register_transform($op1_id,
                                   'assign',
                                   array($op2_id),
@@ -46,14 +59,9 @@ function phpscan_ext_opcode_handler($opcode,
     }
     else if (($opcode === ZendOpcodes::ZEND_ADD) || ($opcode === ZendOpcodes::ZEND_CONCAT))
     {
-      $op1_zval_id = phpscan_ext_get_zval_id($op1);
-      $op2_zval_id = phpscan_ext_get_zval_id($op2);
-      $res_zval_id = phpscan_ext_get_zval_id($result);
-
       if (phpscan_is_tracking($op1_zval_id) || phpscan_is_tracking($op2_zval_id))
       {
-        $op1_id = phpscan_lookup_zval($op1);
-        $op2_id = phpscan_lookup_zval($op2);
+        $result_zval_id = phpscan_ext_get_zval_id($result);
 
         $functions = array(1 => 'add', 8 => 'concat');
 
@@ -76,8 +84,9 @@ function phpscan_ext_opcode_handler($opcode,
             $symbolic_args[] = $arg['id'];
         }
 
-        $__phpscan_variable_map[$res_zval_id] = $func_name . '(' . implode(';', $symbolic_args) . ';' . __phpscan_replace_uniqid() . ')';
-        $result_id = phpscan_lookup_zval($result);
+        $__phpscan_variable_map[$result_zval_id] = $func_name . '(' . implode(';', $symbolic_args) . ';' . __phpscan_replace_uniqid() . ')';
+        print 'RESULT_ZVAL_ID = ' . $result_zval_id . "\n";
+        $result_id = phpscan_lookup_zval_by_id($result_zval_id);
 
 
         phpscan_register_transform($result_id,
@@ -89,36 +98,32 @@ function phpscan_ext_opcode_handler($opcode,
     }
     else
     {
+      $result_zval_id = phpscan_ext_get_zval_id($result);
+
       $op = array(
         'opcode' => $opcode,
 
         'op1_value' => $op1,
-        'op1_id' => phpscan_lookup_zval($op1),
-        'op1_type' => $op1type,
+        'op1_id' => $op1_id,
+        'op1_type' => $op1_type,
         'op1_data_type' => __phpscan_replace_gettype($op1),
 
         'op2_value' => $op2,
-        'op2_id' => phpscan_lookup_zval($op2),
-        'op2_type' => $op2type,
+        'op2_id' => $op2_id,
+        'op2_type' => $op2_type,
         'op2_data_type' => __phpscan_replace_gettype($op2)
       );
       phpscan_log_op($op);
 
       if ($opcode == ZendOpcodes::ZEND_FETCH_DIM_R)
       {
-        $op1_zval_id = phpscan_ext_get_zval_id($op1);
-
         // if (!__phpscan_replace_array_key_exists($res_zval_id, $__phpscan_variable_map))
         if (phpscan_is_tracking($op1_zval_id))
         {
-          $res_zval_id = phpscan_ext_get_zval_id($result);
-          // TODO move this whole php_scan_register into separate function (reuse @ taint hook)
-          $op1_id = phpscan_lookup_zval($op1);
+          if (!__phpscan_replace_array_key_exists($op2, $op1) || !__phpscan_replace_array_key_exists($result_zval_id, $__phpscan_variable_map))
+            $__phpscan_variable_map[$result_zval_id] = 'fetch_dim_r(' . $op1_id . ':' . $op2 .  ')';
 
-          if (!__phpscan_replace_array_key_exists($op2, $op1) || !__phpscan_replace_array_key_exists($res_zval_id, $__phpscan_variable_map))
-            $__phpscan_variable_map[$res_zval_id] = 'fetch_dim_r(' . $op1_id . ':' . $op2 .  ')';
-
-          $res_id = phpscan_lookup_zval($result);
+          $res_id = phpscan_lookup_zval_by_id($result_zval_id);
 
           phpscan_register_transform($res_id,
                                     'fetch_dim_r',
@@ -133,6 +138,7 @@ function phpscan_ext_opcode_handler($opcode,
     }
 
     $__phpscan_op_ignore = false;
+    phpscan_ext_ignore_op_off();
   }
 }
 
@@ -144,8 +150,10 @@ function phpscan_log_op($op)
 
 function phpscan_initialize($state)
 {
+  phpscan_ext_ignore_op();
   phpscan_replace_internals();
   phpscan_initialize_environment($state);
+  phpscan_ext_ignore_op_off();
 }
 
 function phpscan_initialize_environment($state)
@@ -155,13 +163,41 @@ function phpscan_initialize_environment($state)
   $state_decoded = json_decode($state);
   var_dump('SETTING STATE', $state_decoded);
 
+  phpscan_initialize_variables($state_decoded);
+  phpscan_initialize_register_zvals($state_decoded);
+
+  $__phpscan_init_complete = true;
+}
+
+function phpscan_initialize_variables($state_decoded)
+{
   foreach ($state_decoded as $var_name => $var_info)
   {
     $var = phpscan_initialize_variable($var_name, $var_info);
     phpscan_set_toplevel_variable($var_name, $var);
   }
+}
 
-  $__phpscan_init_complete = true;
+function phpscan_initialize_register_zvals($state_decoded)
+{
+  foreach ($state_decoded as $var_name => $var_info)
+  {
+    global ${$var_name};
+    phpscan_register_zval(${$var_name}, $var_info);
+    phpscan_initialize_register_zvals_rec(${$var_name}, $var_info);
+  }
+}
+
+function phpscan_initialize_register_zvals_rec(&$var, $var_info)
+{
+  if (($var_info->type == 'array') and (__phpscan_replace_array_key_exists('properties', $var_info)))
+  {
+    foreach ($var_info->properties as $prop_name => $prop_info)
+    {
+      phpscan_register_zval($var[$prop_name], $prop_info);
+      phpscan_initialize_register_zvals_rec($var[$prop_name], $prop_info);
+    }
+  }
 }
 
 function phpscan_set_toplevel_variable($var_name, $var)
@@ -171,10 +207,10 @@ function phpscan_set_toplevel_variable($var_name, $var)
 }
 
 
-function phpscan_register_zval($var, $var_info)
+function phpscan_register_zval(&$var, $var_info)
 {
   global $__phpscan_variable_map;
-  $var_zval_id = phpscan_ext_get_zval_id($var);
+  $var_zval_id = phpscan_var_id($var);
   $__phpscan_variable_map[$var_zval_id] = $var_info->id;
 }
 
@@ -186,14 +222,16 @@ function phpscan_is_tracking($var_zval_id)
 
 function phpscan_lookup_zval($var)
 {
+  return phpscan_lookup_zval_by_id(phpscan_var_id($var));
+}
+
+function phpscan_lookup_zval_by_id($var_zval_id)
+{
   global $__phpscan_variable_map;
   global $__phpscan_op_ignore;
 
-  $var_zval_id = phpscan_ext_get_zval_id($var);
-
   $__phpscan_op_ignore = true;
   $var_id = 'untracked (zval_id=' . $var_zval_id .')';
-  // TODO __phpscan_replace should not be necessary here
   if (phpscan_is_tracking($var_zval_id))
   {
     $var_id = $__phpscan_variable_map[$var_zval_id];
@@ -221,14 +259,16 @@ function phpscan_initialize_variable($var_name, $var_info)
     case 'double':
       $var = $var_info->value;
       break;
+    case 'unknown':
+      // Type can be unknown if newly discovered and we did not get a typehint yet
+      $var = $var_info->value;
+      break;
     default:
   }
 
   $var = phpscan_separate_zval($var);
 
-  phpscan_register_zval($var, $var_info);
-
-  if (($var_info->type == 'array') and (array_key_exists('properties', $var_info)))
+  if (($var_info->type == 'array') and (__phpscan_replace_array_key_exists('properties', $var_info)))
   {
     foreach ($var_info->properties as $prop_name => $prop_info)
     {
@@ -262,11 +302,13 @@ function phpscan_separate_zval($var)
 
 function phpscan_handle_shutdown()
 {
+  phpscan_ext_ignore_op();
   phpscan_report_opcodes();
   phpscan_report_transform();
+  phpscan_ext_ignore_op_off();
 }
 
-function phpscan_flag($flag)
+function phpscan_flag($flag = 'default')
 {
   print '__PHPSCAN_FLAG__' . $flag . '__/PHPSCAN_FLAG__';
 }
@@ -280,6 +322,9 @@ function phpscan_report_opcodes()
 
   global $__phpscan_variable_map;
   var_dump('MAP', $__phpscan_variable_map);
+
+  global $__phpscan_var_id_lookup;
+  var_dump('LOOKUP', $__phpscan_var_id_lookup);
 }
 
 function phpscan_report_transform()
@@ -312,7 +357,7 @@ function __phpscan_taint_hook($func, $args)
   for ($i = 0; $i < __phpscan_replace_count($args); ++$i)
   {
     $var = $args[$i];
-    $var_zval_id = phpscan_ext_get_zval_id($var);
+    $var_zval_id = phpscan_var_id($var);
     if (__phpscan_replace_array_key_exists($var_zval_id, $__phpscan_variable_map))
     {
       $taint[] = $__phpscan_variable_map[$var_zval_id];
@@ -343,7 +388,7 @@ function __phpscan_taint_hook($func, $args)
 
   if (__phpscan_replace_count($taint) > 0)
   {
-    $res_zval_id = phpscan_ext_get_zval_id($res);
+    $res_zval_id = phpscan_var_id($res);
     $__phpscan_variable_map[$res_zval_id] = $short_func . '(' . __phpscan_replace_implode(',', $taint) . ':' . __phpscan_replace_uniqid() . ')';
 
     phpscan_register_transform($__phpscan_variable_map[$res_zval_id],
