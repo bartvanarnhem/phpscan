@@ -22,6 +22,11 @@ class Resolver(object):
         condition = {}
 
         if self._state.is_tracking(var_id):
+            var = self._state.get_var_ref(var_id)
+
+            if var['type'] == 'unknown':
+                self._state.update_guessed_type(var_id, data_type)
+
             condition = {
                 'type': 'base_var',
                 'id': var_id

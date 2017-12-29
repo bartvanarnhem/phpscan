@@ -23,6 +23,8 @@ class UninitializedPropertyAccessHandler(OpcodeHandler):
             state_var = self.satisfier.start_state.get_var_ref(compare_op.id)
             property_name = value_op.value
 
+            state_var['type'] = 'array' # force this to be an array
+
             if not 'properties' in state_var:
                 state_var['properties'] = {}
 
@@ -31,7 +33,7 @@ class UninitializedPropertyAccessHandler(OpcodeHandler):
                 prop_id = 'fetch_dim_r(%s:%s)' % (compare_op.id, property_name)
 
                 state_var['properties'][property_name] = {
-                    'type': 'string',
+                    'type': 'unknown',
                     'value': ''
                 }
 
@@ -49,7 +51,7 @@ class UninitializedPropertyAccessHandler(OpcodeHandler):
                 prop_id = 'fetch_dim_r(%s:%s)' % (compare_op.id, property_name)
 
                 state_var['properties'][property_name] = {
-                    'type': 'string',
+                    'type': 'unknown',
                     'value': '',
                     'id': prop_id,
                     'persistent_id': state_var['persistent_id'] + ':' + property_name
@@ -65,7 +67,8 @@ class IsEqualHandler(OpcodeHandler):
         data_type = value_op.data_type
         value = value_op.value
 
-        self.update_guessed_type_from_value(var_id, value)
+        # TODO: maybe remove
+        # self.update_guessed_type_from_value(var_id, value)
 
         self.establish_var_value(var_id, data_type, value, 'equals')
 
@@ -75,7 +78,8 @@ class IsNotEqualHandler(OpcodeHandler):
         data_type = value_op.data_type
         value = value_op.value
 
-        self.update_guessed_type_from_value(var_id, value)
+        # TODO: maybe remove
+        # self.update_guessed_type_from_value(var_id, value)
 
         self.establish_var_value(var_id, data_type, value, 'not_equals')
 
@@ -85,7 +89,8 @@ class IsSmallerHandler(OpcodeHandler):
         data_type = value_op.data_type
         value = value_op.value
 
-        self.update_guessed_type_from_value(var_id, value)
+        # TODO: maybe remove
+        # self.update_guessed_type_from_value(var_id, value)
 
         self.establish_var_value(var_id, data_type, value, 'smaller' if sign == 1 else 'greater')
 

@@ -65,12 +65,15 @@ class Logger(object):
     def verbosity(self, value):
         self._verbosity = value
 
-    def log(self, section, content, min_level=0):
+    def log(self, message, min_level=0):
+        self.log('', message, min_level)
+
+    def log(self, section, message, min_level=0):
         if self.verbosity >= min_level:
             if section:
                 print section
-            if content:
-                print content
+            if message:
+                print message
             print ''
 
 logger = Logger()
@@ -155,17 +158,33 @@ class State(object):
 
     def update_guessed_type_from_value(self, var_id, value):
         if self.is_tracking(var_id):
+            if isinstance(value, int):
+                self.update_guessed_type(var_id, 'integer')
+        else:
+            logger.log('Warning: ignoring guessed type for untracked variable %s' % var_id, Logger.DEBUG)
+
+    def update_guessed_type(self, var_id, typehint):
+        if self.is_tracking(var_id):
             var = self.get_var_ref(var_id)
 
-            if isinstance(value, int) and var['type'] != 'integer':
-                var['type'] = 'integer'
-                try:
-                    var['value'] = int(var['value'])
-                except ValueError:
-                    logger.log('Got op type hint for integer but could not cast %s to int.' %
-                            var['value'], '', Logger.DEBUG)
+            if var['type'] == 'unknown' and typehint != var['type']:
+                if typehint == 'integer':
+                    try:
+                        orig_val = var['value']
 
-                    var['value'] = 0
+                        if (isinstance(orig_val, str) or isinstance(orig_val, unicode)) and len(orig_val.strip()) == 0:
+                            orig_val = 0
+
+                        int_val = int(orig_val)
+                        var['value'] = int_val
+                        var['type'] = 'integer'
+                    except ValueError:
+                        logger.log('Got op type hint for integer but could not cast \'%s\' to int.' %
+                                var['value'], Logger.DEBUG)
+                else:
+                    logger.log('Warning: ignoring guessed type for variable %s, cannot handle typehint %s' % (var_id,           typehint), Logger.DEBUG)
+        else:
+            logger.log('Warning: ignoring guessed type for untracked variable %s' % var_id, Logger.DEBUG)
 
     def annotate(self):
         self._lookup_map = dict()

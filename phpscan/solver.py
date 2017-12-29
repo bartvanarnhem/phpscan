@@ -30,7 +30,8 @@ class Solver(object):
         logger.log('BASE VARS', json.dumps(state._lookup_map, indent=4), Logger.PROGRESS)
 
         for var_id, var in state._lookup_map.iteritems():
-            if var['type'] == 'string':
+            if var['type'] in ('string', 'unknown'):
+                # Type could be unknown if newly discovered and we did not get a typehint yet
                 self._base_var[var_id] = z3.String(var_id)
             elif var['type'] == 'integer':
                 self._base_var[var_id] = z3.Int(var_id)
